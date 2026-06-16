@@ -9,7 +9,7 @@ const leadSchema = new mongoose.Schema(
     source: { type: String, enum: ['field_visit', 'website', 'referral', 'campaign', 'manual'], default: 'manual' },
     status: {
       type: String,
-      enum: ['new', 'assigned', 'in_progress', 'follow_up', 'converted', 'lost'],
+      enum: ['new', 'assigned','contacted', 'in_progress', 'follow_up', 'converted', 'lost'],
       default: 'new',
       index: true
     },
