@@ -6,13 +6,36 @@ const leadSchema = new mongoose.Schema(
     customerName: { type: String, required: true, trim: true, index: true },
     phone: { type: String, trim: true, index: true },
     email: { type: String, lowercase: true, trim: true },
-    source: { type: String, enum: ['field_visit', 'website', 'referral', 'campaign', 'manual'], default: 'manual' },
+ source: {
+  type: String,
+  enum: [
+    'website',
+    'referral',
+    'cold_call',
+    'social_media',
+    'exhibition',
+    'other',
+    'field_visit',
+    'campaign',
+    'manual'
+  ],
+  default: 'manual'
+},
     status: {
-      type: String,
-      enum: ['new', 'assigned','contacted', 'in_progress', 'follow_up', 'converted', 'lost'],
-      default: 'new',
-      index: true
-    },
+  type: String,
+  enum: [
+    'new',
+    'contacted',
+    'qualified',
+    'converted',
+    'lost',
+    'assigned',
+    'in_progress',
+    'follow_up'
+  ],
+  default: 'new',
+  index: true
+},
     priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
