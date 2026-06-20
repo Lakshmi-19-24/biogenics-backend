@@ -14,7 +14,18 @@ const interactionSchema = new mongoose.Schema(
 const customerSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
-    type: { type: String, enum: ['customer', 'lab', 'hospital', 'clinic', 'distributor'], default: 'customer' },
+   type: {
+  type: String,
+  enum: [
+    'clinical lab',
+    'institution',
+    'industry',
+    'seed company',
+    'hospital',
+    'others'
+  ],
+  default: 'others'
+},
     contactPerson: { type: String, trim: true },
     email: { type: String, lowercase: true, trim: true },
     phone: { type: String, trim: true, index: true },

@@ -34,6 +34,14 @@ export const createLocationPing = asyncHandler(async (req, res) => {
  * Lists location pings for route playback and audit.
  */
 export const listLocationPings = asyncHandler(async (req, res) => {
+
+    if (
+   
+    req.user.role !== ROLES.MANAGER &&
+    req.user.role !== ROLES.OWNER
+  ) {
+    return sendResponse(res, 403, 'Access denied');
+  }
   const { page, limit, skip } = getPagination(req.query);
   const filter = {};
   if (req.query.employee) filter.employee = req.query.employee;
