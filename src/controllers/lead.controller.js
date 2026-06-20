@@ -8,26 +8,14 @@ import { MANAGEMENT_ROLES } from '../constants/roles.js';
 
 export const listLeads = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-
   const filter = buildSearchFilter(req.query.search, ['title', 'customerName', 'phone']);
-
-  if (!MANAGEMENT_ROLES.includes(req.user.role)) {
-    filter.assignedTo = req.user._id;
-  }
-
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.assignedTo) filter.assignedTo = req.query.assignedTo;
 
   const [items, total] = await Promise.all([
-    Lead.find(filter)
-      .populate('assignedTo', 'name email')
-      .skip(skip)
-      .limit(limit)
-      .sort('-createdAt'),
+    Lead.find(filter).populate('assignedTo', 'name email').skip(skip).limit(limit).sort('-createdAt'),
     Lead.countDocuments(filter)
   ]);
-
-  sendResponse(res, 200, 'Leads fetched', { items, page, limit, total });
-});
 
   sendResponse(res, 200, 'Leads fetched', { items, page, limit, total });
 });
