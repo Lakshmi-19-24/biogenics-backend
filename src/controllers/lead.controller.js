@@ -1,4 +1,4 @@
-import { Lead } from '../models/lead.model.js';
+cimport { Lead } from '../models/lead.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendResponse } from '../utils/apiResponse.js';
@@ -8,16 +8,40 @@ import { MANAGEMENT_ROLES } from '../constants/roles.js';
 
 export const listLeads = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filter = buildSearchFilter(req.query.search, ['title', 'customerName', 'phone']);
+
+  const filter = buildSearchFilter(req.query.search, [
+    'title',
+    'customerName',
+    'phone'
+  ]);
+
   if (req.query.status) filter.status = req.query.status;
   if (req.query.assignedTo) filter.assignedTo = req.query.assignedTo;
 
+  // Sales users can only see their own leads
+  if (req.user.role === 'sales') {
+    filter.$or = [
+      { assignedTo: req.user._id },
+      { createdBy: req.user._id }
+    ];
+  }
+
   const [items, total] = await Promise.all([
-    Lead.find(filter).populate('assignedTo', 'name email').skip(skip).limit(limit).sort('-createdAt'),
+    Lead.find(filter)
+      .populate('assignedTo', 'name email')
+      .skip(skip)
+      .limit(limit)
+      .sort('-createdAt'),
+
     Lead.countDocuments(filter)
   ]);
 
-  sendResponse(res, 200, 'Leads fetched', { items, page, limit, total });
+  sendResponse(res, 200, 'Leads fetched', {
+    items,
+    page,
+    limit,
+    total
+  });
 });
 
 export const createLead = asyncHandler(async (req, res) => {
