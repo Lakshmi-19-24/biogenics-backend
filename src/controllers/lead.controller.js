@@ -1,4 +1,4 @@
-cimport { Lead } from '../models/lead.model.js';
+import { Lead } from '../models/lead.model.js';
 import { ApiError } from '../utils/apiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendResponse } from '../utils/apiResponse.js';
