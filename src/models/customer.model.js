@@ -17,6 +17,7 @@ const customerSchema = new mongoose.Schema(
    type: {
   type: String,
   enum: [
+    'customer',
     'clinical lab',
     'institution',
     'industry',
@@ -24,7 +25,7 @@ const customerSchema = new mongoose.Schema(
     'hospital',
     'others'
   ],
-  default: 'others'
+  default: 'customer'
 },
     contactPerson: { type: String, trim: true },
     email: { type: String, lowercase: true, trim: true },
@@ -56,4 +57,4 @@ const customerSchema = new mongoose.Schema(
 
 customerSchema.index({ location: '2dsphere' });
 
-export const Customer = mongoose.model('Customer', customerSchema);
+export const Customer = mongoose.model('Customer', customerSchema, 'customers');
