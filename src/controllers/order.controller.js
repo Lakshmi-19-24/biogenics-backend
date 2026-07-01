@@ -133,7 +133,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     items,
     subtotal,
     taxTotal,
-    grandTotal: subtotal + taxTotal,
+   grandTotal: Number(body.grandTotal || (subtotal + taxTotal)),
     placedBy: req.user._id
   });
 
