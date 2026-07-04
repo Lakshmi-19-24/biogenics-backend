@@ -5,7 +5,25 @@ import { authenticate, authorize } from '../middlewares/auth.js';
 
 export const analyticsRouter = Router();
 
-analyticsRouter.use(authenticate, authorize(...ADMIN_ROLES, ROLES.MANAGER));
-analyticsRouter.get('/', dashboardSummary);
-analyticsRouter.get('/dashboard', dashboardSummary);
-analyticsRouter.get('/sales-by-employee', salesByEmployee);
+// Login required for all analytics routes
+analyticsRouter.use(authenticate);
+
+// Dashboard can be accessed by Admin, Manager and Sales Executive
+analyticsRouter.get(
+  '/dashboard',
+  authorize(...ADMIN_ROLES, ROLES.MANAGER, ROLES.SALES_EXECUTIVE),
+  dashboardSummary
+);
+
+// Admin & Manager only
+analyticsRouter.get(
+  '/',
+  authorize(...ADMIN_ROLES, ROLES.MANAGER),
+  dashboardSummary
+);
+
+analyticsRouter.get(
+  '/sales-by-employee',
+  authorize(...ADMIN_ROLES, ROLES.MANAGER),
+  salesByEmployee
+);
