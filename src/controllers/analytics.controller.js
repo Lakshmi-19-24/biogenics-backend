@@ -3,7 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendResponse } from '../utils/apiResponse.js';
 
 export const dashboardSummary = asyncHandler(async (req, res) => {
-  const isSalesExecutive = req.user.role === "sales_executive";
+const isSalesExecutive = req.user.role === "sales";
 
   const orderFilter = isSalesExecutive
     ? { placedBy: req.user._id }
