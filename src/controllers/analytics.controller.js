@@ -80,3 +80,21 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     payments: { received: paymentAgg[0]?.total || 0 },
   });
 });
+export const salesByEmployee = asyncHandler(async (_req, res) => {
+  const report = await Order.aggregate([
+    { $group: { _id: '$placedBy', totalSales: { $sum: '$grandTotal' }, orderCount: { $sum: 1 } } },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'employee'
+      }
+    },
+    { $unwind: '$employee' },
+    { $project: { totalSales: 1, orderCount: 1, employee: { name: 1, email: 1, role: 1 } } },
+    { $sort: { totalSales: -1 } }
+  ]);
+
+  sendResponse(res, 200, 'Sales by employee fetched', report);
+});
