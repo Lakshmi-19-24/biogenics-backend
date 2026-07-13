@@ -25,7 +25,12 @@ app.use(
       // Allow non-browser tools (no Origin header)
       if (!origin) return cb(null, true);
 
-      const allowList = new Set([env.CLIENT_URL, 'http://localhost:5173']);
+      const allowList = new Set([
+  env.CLIENT_URL,
+  'https://biogenicslifecare.com',
+  'https://www.biogenicslifecare.com',
+  'http://localhost:5173'
+]);
       if (allowList.has(origin)) return cb(null, true);
 
       // Dev convenience: allow any Vite localhost port
