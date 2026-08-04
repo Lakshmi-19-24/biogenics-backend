@@ -22,6 +22,8 @@ const canManageDocument = (document, user) =>
   MANAGEMENT_ROLES.includes(user.role) || String(document.uploadedBy) === String(user._id);
 
 export const uploadDocument = asyncHandler(async (req, res) => {
+  console.log("UPLOAD API HIT");
+console.log("User:", req.user);
   if (!req.file) throw new ApiError(400, 'Document file is required');
 
   const file = await uploadToImageKit(req.file, '/biogenics/documents');

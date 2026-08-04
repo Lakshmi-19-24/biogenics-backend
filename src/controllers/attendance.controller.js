@@ -210,6 +210,27 @@ export const checkOut = asyncHandler(async (req, res) => {
   sendResponse(res, 200, 'Attendance checked out', attendance);
 });
 
+
+export const getEmployeeLocation = asyncHandler(async (req, res) => {
+  const attendance = await Attendance.findOne({
+    employee: req.params.employeeId
+  }).sort({ createdAt: -1 });
+
+  if (!attendance) {
+    throw new ApiError(404, "Location not found");
+  }
+
+  sendResponse(res, 200, "Location fetched", {
+    employee: attendance.employee,
+    latitude: attendance.checkInLocation.coordinates[1],
+    longitude: attendance.checkInLocation.coordinates[0],
+    checkInAt: attendance.checkInAt
+  });
+});
+
+
+
+
 export const listAttendance = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filter = {};
