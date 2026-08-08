@@ -67,17 +67,36 @@ export const listMyDailyReports = asyncHandler(async (req, res) => {
 });
 
 export const reviewDailyReport = asyncHandler(async (req, res) => {
+  const status = req.body.status;
+
+  const update = {
+    status,
+  };
+
+  if (status === "submitted") {
+    // Move report back to Pending
+    update.reviewNote = undefined;
+    update.reviewedBy = undefined;
+    update.reviewedAt = undefined;
+  } else {
+    // Reviewed or Rejected
+    update.reviewNote = req.body.reviewNote || "";
+    update.reviewedBy = req.user._id;
+    update.reviewedAt = new Date();
+  }
+
   const report = await DailyReport.findByIdAndUpdate(
     req.params.id,
+    update,
     {
-      status: req.body.status,
-      reviewNote: req.body.reviewNote,
-      reviewedBy: req.user._id,
-      reviewedAt: new Date()
-    },
-    { new: true, runValidators: true }
+      new: true,
+      runValidators: true,
+    }
   );
-  if (!report) throw new ApiError(404, 'Daily report not found');
 
-  sendResponse(res, 200, 'Daily report reviewed', report);
+  if (!report) {
+    throw new ApiError(404, "Daily report not found");
+  }
+
+  sendResponse(res, 200, "Daily report updated", report);
 });
