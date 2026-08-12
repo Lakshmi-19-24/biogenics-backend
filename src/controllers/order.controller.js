@@ -306,3 +306,53 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
   }
   sendResponse(res, 200, 'Order status updated', order);
 });
+export const deleteOrder = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    throw new ApiError(404, 'Order not found');
+  }
+
+  // Find inventory movements created by this order.
+  const movements = await InventoryMovement.find({
+    referenceId: order._id,
+    referenceType: 'Order'
+  });
+
+  // Restore only stock that was actually allocated.
+  // "Backorder (remaining)" movements did NOT reduce stock,
+  // so they must not be added back.
+  for (const movement of movements) {
+    if (
+      movement.type === 'sale' &&
+      !String(movement.note || '').toLowerCase().includes('backorder')
+    ) {
+      const product = await Product.findById(movement.product);
+
+      if (product) {
+        product.stock += Number(movement.quantity || 0);
+        await product.save();
+      }
+    }
+  }
+
+  // Remove inventory movements belonging to this order.
+  await InventoryMovement.deleteMany({
+    referenceId: order._id,
+    referenceType: 'Order'
+  });
+
+  // Delete the order itself.
+  await Order.deleteOne({
+    _id: order._id
+  });
+
+  sendResponse(
+    res,
+    200,
+    'Order deleted successfully',
+    {
+      orderId: order._id
+    }
+  );
+});
