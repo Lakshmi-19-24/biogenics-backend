@@ -5,7 +5,6 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendResponse } from '../utils/apiResponse.js';
 import { getPagination } from '../utils/pagination.js';
 
-
 export const listInventoryMovements = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
 
@@ -39,23 +38,11 @@ export const listInventoryMovements = asyncHandler(async (req, res) => {
   );
 });
 
-
 export const deleteInventoryMovement = asyncHandler(async (req, res) => {
   const movement = await InventoryMovement.findById(req.params.id);
 
   if (!movement) {
     throw new ApiError(404, 'Inventory movement not found');
-  }
-
-  // Do not allow deleting movements created from orders.
-  if (
-    movement.referenceType &&
-    movement.referenceType !== 'Manual'
-  ) {
-    throw new ApiError(
-      400,
-      'Order or return inventory movements cannot be deleted manually'
-    );
   }
 
   const product = await Product.findById(movement.product);
@@ -67,9 +54,9 @@ export const deleteInventoryMovement = asyncHandler(async (req, res) => {
   const quantity = Number(movement.quantity || 0);
 
   // Reverse the original stock change.
-  // sale originally decreased stock, so deleting it increases stock.
-  // purchase/return/adjustment originally increased stock, so deleting
-  // them decreases stock.
+  // Sale originally decreases stock, so deleting it increases stock.
+  // Purchase/return/adjustment originally increase stock,
+  // so deleting them decreases stock.
   const reverseDelta =
     movement.type === 'sale'
       ? quantity
