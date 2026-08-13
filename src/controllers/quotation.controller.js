@@ -96,3 +96,12 @@ export const updateQuotationStatus = asyncHandler(async (req, res) => {
   if (!quotation) throw new ApiError(404, 'Quotation not found');
   sendResponse(res, 200, 'Quotation status updated', quotation);
 });
+export const deleteQuotation = asyncHandler(async (req, res) => {
+  const quotation = await Quotation.findByIdAndDelete(req.params.id);
+
+  if (!quotation) {
+    throw new ApiError(404, "Quotation not found");
+  }
+
+  sendResponse(res, 200, "Quotation deleted successfully", quotation);
+});
