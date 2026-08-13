@@ -5,35 +5,86 @@ import { sendResponse } from '../utils/apiResponse.js';
 import { getPagination } from '../utils/pagination.js';
 
 const makeQuotationNo = () => `QUO-${Date.now()}`;
-
 export const createQuotation = asyncHandler(async (req, res) => {
   if (!Array.isArray(req.body.items) || req.body.items.length === 0) {
-    throw new ApiError(400, 'Quotation must contain at least one item');
+    throw new ApiError(
+      400,
+      "Quotation must contain at least one item"
+    );
   }
 
-  const total = req.body.items.reduce((sum, item) => sum + item.quantity * item.price, 0);
+  const total = req.body.items.reduce(
+    (sum, item) =>
+      sum +
+      Number(item.quantity || 0) *
+        Number(item.price || 0),
+    0
+  );
+
+  const assignedTo = req.body.assignedTo;
+
+  console.log(
+    "QUOTATION ASSIGNED TO:",
+    assignedTo
+  );
+
+  console.log(
+    "REQUEST BODY:",
+    req.body
+  );
+
   const quotation = await Quotation.create({
     ...req.body,
     quotationNo: makeQuotationNo(),
     total,
-    createdBy: req.user._id
+    assignedTo,
+    createdBy: req.user._id,
   });
 
-  sendResponse(res, 201, 'Quotation created', quotation);
+  sendResponse(
+    res,
+    201,
+    "Quotation created",
+    quotation
+  );
 });
 
 export const listQuotations = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
+
   const filter = {};
-  if (req.query.customer) filter.customer = req.query.customer;
-  if (req.query.status) filter.status = req.query.status;
+
+  if (req.query.customer) {
+    filter.customer = req.query.customer;
+  }
+
+  if (req.query.status) {
+    filter.status = req.query.status;
+  }
+
+  // Sales executives can see ONLY quotations assigned to them.
+  if (req.user.role === "sales") {
+    filter.assignedTo = req.user._id;
+  }
 
   const [items, total] = await Promise.all([
-    Quotation.find(filter).populate('customer', 'name phone').populate('createdBy', 'name email').skip(skip).limit(limit).sort('-createdAt'),
-    Quotation.countDocuments(filter)
+    Quotation.find(filter)
+      .populate("customer", "name phone")
+      .populate("createdBy", "name email")
+      .populate("assignedTo", "name email role")
+      .skip(skip)
+      .limit(limit)
+      .sort("-createdAt"),
+
+    Quotation.countDocuments(filter),
   ]);
 
-  sendResponse(res, 200, 'Quotations fetched', { items, page, limit, total });
+  sendResponse(res, 200, "Quotations fetched", {
+    items,
+    page,
+    limit,
+    total,
+  });
 });
 
 export const updateQuotationStatus = asyncHandler(async (req, res) => {

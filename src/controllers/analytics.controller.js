@@ -1,9 +1,18 @@
-import { Attendance, Lead, Order, Payment, Product, User, Visit } from '../models/index.js';
+import {
+  Attendance,
+  Lead,
+  Order,
+  Payment,
+  Product,
+  User,
+  Visit,
+  Reminder,
+  DailyReport
+} from '../models/index.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { sendResponse } from '../utils/apiResponse.js';
-
 export const dashboardSummary = asyncHandler(async (req, res) => {
-const isSalesExecutive = req.user.role === "sales";
+  const isSalesExecutive = req.user.role === "sales";
 
   const orderFilter = isSalesExecutive
     ? { placedBy: req.user._id }
@@ -26,6 +35,52 @@ const isSalesExecutive = req.user.role === "sales";
         date: new Date().toISOString().slice(0, 10),
       };
 
+  const reportDate = new Date().toISOString().slice(0, 10);
+
+  // Pending work filters
+  const newLeadFilter = {
+    ...leadFilter,
+    status: "new",
+  };
+
+  const followUpFilter = {
+    ...leadFilter,
+    $or: [
+      { status: "follow_up" },
+      {
+        nextFollowUpAt: {
+          $lte: new Date(),
+        },
+        status: {
+          $nin: ["converted", "lost"],
+        },
+      },
+    ],
+  };
+
+  const pendingOrderFilter = {
+    ...orderFilter,
+    status: {
+      $in: ["placed", "approved"],
+    },
+  };
+
+  const reminderFilter = isSalesExecutive
+    ? {
+        assignedTo: req.user._id,
+        status: "pending",
+        dueAt: { $lte: new Date() },
+      }
+    : {
+        status: "pending",
+        dueAt: { $lte: new Date() },
+      };
+
+  const dailyReportFilter = {
+    employee: req.user._id,
+    reportDate,
+  };
+
   const [
     totalUsers,
     activeUsers,
@@ -37,12 +92,28 @@ const isSalesExecutive = req.user.role === "sales";
     todayAttendance,
     salesAgg,
     paymentAgg,
+
+    // Pending work
+    newLeadsCount,
+    followUpsCount,
+    pendingOrdersCount,
+    pendingRemindersCount,
+    todayDailyReport,
   ] = await Promise.all([
     User.countDocuments(),
-    User.countDocuments({ isActive: true }),
-    Product.countDocuments({ isActive: true }),
+
+    User.countDocuments({
+      isActive: true,
+    }),
+
     Product.countDocuments({
-      $expr: { $lte: ["$stock", "$lowStockThreshold"] },
+      isActive: true,
+    }),
+
+    Product.countDocuments({
+      $expr: {
+        $lte: ["$stock", "$lowStockThreshold"],
+      },
     }),
 
     Order.countDocuments(orderFilter),
@@ -54,51 +125,131 @@ const isSalesExecutive = req.user.role === "sales";
     Attendance.countDocuments(attendanceFilter),
 
     Order.aggregate([
-      { $match: orderFilter },
+      {
+        $match: orderFilter,
+      },
       {
         $group: {
           _id: null,
-          total: { $sum: "$grandTotal" },
+          total: {
+            $sum: "$grandTotal",
+          },
         },
       },
     ]),
 
     Payment.aggregate([
-      { $match: { status: "received" } },
+      {
+        $match: {
+          status: "received",
+        },
+      },
       {
         $group: {
           _id: null,
-          total: { $sum: "$amount" },
+          total: {
+            $sum: "$amount",
+          },
         },
       },
     ]),
+
+    // New leads
+    Lead.countDocuments(newLeadFilter),
+
+    // Follow-ups
+    Lead.countDocuments(followUpFilter),
+
+    // Pending orders
+    Order.countDocuments(pendingOrderFilter),
+
+    // Due reminders
+    Reminder.countDocuments(reminderFilter),
+
+    // Today's daily report
+    DailyReport.findOne(dailyReportFilter).select("status"),
   ]);
 
   sendResponse(res, 200, "Dashboard summary fetched", {
-    users: { total: totalUsers, active: activeUsers },
-    products: { total: totalProducts, lowStock: lowStockProducts },
-    orders: { total: totalOrders, salesValue: salesAgg[0]?.total || 0 },
-    leads: { total: totalLeads },
-    visits: { total: totalVisits },
-    attendance: { today: todayAttendance },
-    payments: { received: paymentAgg[0]?.total || 0 },
+    users: {
+      total: totalUsers,
+      active: activeUsers,
+    },
+
+    products: {
+      total: totalProducts,
+      lowStock: lowStockProducts,
+    },
+
+    orders: {
+      total: totalOrders,
+      salesValue: salesAgg[0]?.total || 0,
+    },
+
+    leads: {
+      total: totalLeads,
+    },
+
+    visits: {
+      total: totalVisits,
+    },
+
+    attendance: {
+      today: todayAttendance,
+    },
+
+    payments: {
+      received: paymentAgg[0]?.total || 0,
+    },
+
+    pendingTasks: {
+      newLeads: newLeadsCount,
+      followUps: followUpsCount,
+      orders: pendingOrdersCount,
+      reminders: pendingRemindersCount,
+      dailyReport: Boolean(todayDailyReport),
+      dailyReportStatus: todayDailyReport?.status || "pending",
+    },
   });
 });
+
 export const salesByEmployee = asyncHandler(async (_req, res) => {
   const report = await Order.aggregate([
-    { $group: { _id: '$placedBy', totalSales: { $sum: '$grandTotal' }, orderCount: { $sum: 1 } } },
+    {
+      $group: {
+        _id: "$placedBy",
+        totalSales: { $sum: "$grandTotal" },
+        orderCount: { $sum: 1 },
+      },
+    },
     {
       $lookup: {
-        from: 'users',
-        localField: '_id',
-        foreignField: '_id',
-        as: 'employee'
-      }
+        from: "users",
+        localField: "_id",
+        foreignField: "_id",
+        as: "employee",
+      },
     },
-    { $unwind: '$employee' },
-    { $project: { totalSales: 1, orderCount: 1, employee: { name: 1, email: 1, role: 1 } } },
-    { $sort: { totalSales: -1 } }
+    {
+      $unwind: "$employee",
+    },
+    {
+      $project: {
+        totalSales: 1,
+        orderCount: 1,
+        employee: {
+          name: 1,
+          email: 1,
+          role: 1,
+        },
+      },
+    },
+    {
+      $sort: {
+        totalSales: -1,
+      },
+    },
   ]);
 
-  sendResponse(res, 200, 'Sales by employee fetched', report);
+  sendResponse(res, 200, "Sales by employee fetched", report);
 });
