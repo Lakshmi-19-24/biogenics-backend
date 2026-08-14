@@ -1,9 +1,10 @@
-import { Reminder } from '../models/reminder.model.js';
-import { DailyReport } from '../models/dailyReport.model.js';
-import { User } from '../models/user.model.js';
-import { Notification } from '../models/notification.model.js';
-import { notifyUser } from './notification.service.js';
-import { ROLES } from '../constants/roles.js';
+import { Reminder } from "../models/reminder.model.js";
+import { DailyReport } from "../models/dailyReport.model.js";
+import { Document } from "../models/document.model.js";
+import { User } from "../models/user.model.js";
+import { Notification } from "../models/notification.model.js";
+import { notifyUser } from "./notification.service.js";
+import { ROLES } from "../constants/roles.js";
 
 let reminderTimer;
 
@@ -12,13 +13,13 @@ const today = () => {
 };
 
 /**
- * Process reminders that are due.
+ * Process normal reminders that are due.
  */
 export const processDueReminders = async () => {
   const dueReminders = await Reminder.find({
-    status: 'pending',
+    status: "pending",
     notifiedAt: { $exists: false },
-    dueAt: { $lte: new Date() }
+    dueAt: { $lte: new Date() },
   }).limit(50);
 
   console.log(
@@ -33,20 +34,107 @@ export const processDueReminders = async () => {
 
       await notifyUser({
         recipient: reminder.assignedTo.toString(),
-        title: 'Reminder due',
+        title: "Reminder due",
         message: reminder.description
           ? `${reminder.title}: ${reminder.description}`
           : reminder.title,
-        type: 'reminder',
+        type: "reminder",
         data: {
-          action: 'reminder_due',
+          action: "reminder_due",
           reminderId: reminder._id.toString(),
-          dueAt: reminder.dueAt
-        }
+          dueAt: reminder.dueAt,
+        },
       });
 
       reminder.notifiedAt = new Date();
       await reminder.save();
+    })
+  );
+};
+
+/**
+ * Process uploaded document reminders.
+ */
+export const processDocumentReminders = async () => {
+  const now = new Date();
+
+  const documents = await Document.find({
+    reminderAt: {
+      $exists: true,
+      $ne: null,
+      $lte: now,
+    },
+    reminderCompleted: {
+      $ne: true,
+    },
+  })
+    .populate("uploadedBy", "name email")
+    .limit(50);
+
+  console.log(
+    `📄 Document reminders found: ${documents.length}`
+  );
+
+  await Promise.all(
+    documents.map(async (document) => {
+      if (!document.uploadedBy) {
+        return;
+      }
+
+      const reminderAt = document.reminderAt
+        ? new Date(document.reminderAt).toISOString()
+        : "";
+
+      /*
+       * Prevent the same document reminder from
+       * creating notifications every 30 seconds.
+       */
+      const existingNotification =
+        await Notification.findOne({
+          recipient: document.uploadedBy._id,
+          "data.action": "document_reminder",
+          "data.documentId": document._id.toString(),
+          "data.reminderAt": reminderAt,
+        });
+
+      if (existingNotification) {
+        return;
+      }
+
+      const customerName =
+        document.customer?.name || "";
+
+      let message = `Follow-up reminder for document "${document.title}".`;
+
+      if (document.reminderNote) {
+        message += ` ${document.reminderNote}`;
+      }
+
+      if (customerName) {
+        message += ` Customer: ${customerName}.`;
+      }
+
+      console.log(
+        `📄 Sending document reminder to ${document.uploadedBy.name}`
+      );
+
+      await notifyUser({
+        recipient: document.uploadedBy._id.toString(),
+
+        title: "Document Reminder",
+
+        message,
+
+        type: "reminder",
+
+        data: {
+          action: "document_reminder",
+          documentId: document._id.toString(),
+          documentTitle: document.title,
+          reminderAt,
+          reminderNote: document.reminderNote || "",
+        },
+      });
     })
   );
 };
@@ -60,19 +148,23 @@ export const processPendingDailyReports = async () => {
 
   const salesEmployees = await User.find({
     role: ROLES.SALES_EXECUTIVE,
-    isActive: true
-  }).select('_id name');
+    isActive: true,
+  }).select("_id name");
 
-  if (!salesEmployees.length) return;
+  if (!salesEmployees.length) {
+    return;
+  }
 
   const employeeIds = salesEmployees.map(
     (employee) => employee._id
   );
 
   const submittedReports = await DailyReport.find({
-    employee: { $in: employeeIds },
-    reportDate
-  }).select('employee');
+    employee: {
+      $in: employeeIds,
+    },
+    reportDate,
+  }).select("employee");
 
   const submittedEmployeeIds = new Set(
     submittedReports.map(
@@ -94,17 +186,22 @@ export const processPendingDailyReports = async () => {
   await Promise.all(
     pendingEmployees.map(async (employee) => {
       const startOfToday = new Date();
+
       startOfToday.setHours(0, 0, 0, 0);
 
       const existingNotification =
         await Notification.findOne({
           recipient: employee._id,
-          'data.action': 'pending_daily_report',
-          'data.reportDate': reportDate,
-          createdAt: { $gte: startOfToday }
+          "data.action": "pending_daily_report",
+          "data.reportDate": reportDate,
+          createdAt: {
+            $gte: startOfToday,
+          },
         });
 
-      if (existingNotification) return;
+      if (existingNotification) {
+        return;
+      }
 
       console.log(
         `📋 Sending pending report notification to ${employee.name}`
@@ -112,15 +209,19 @@ export const processPendingDailyReports = async () => {
 
       await notifyUser({
         recipient: employee._id.toString(),
-        title: 'Pending Daily Report',
+
+        title: "Pending Daily Report",
+
         message:
-          'Your daily report is pending. Please submit it.',
-        type: 'reminder',
+          "Your daily report is pending. Please submit it.",
+
+        type: "reminder",
+
         data: {
-          action: 'pending_daily_report',
+          action: "pending_daily_report",
           reportDate,
-          employeeId: employee._id.toString()
-        }
+          employeeId: employee._id.toString(),
+        },
       });
     })
   );
@@ -132,7 +233,8 @@ export const processPendingDailyReports = async () => {
 export const processPendingWork = async () => {
   await Promise.all([
     processDueReminders(),
-    processPendingDailyReports()
+    processDocumentReminders(),
+    processPendingDailyReports(),
   ]);
 };
 
@@ -140,13 +242,17 @@ export const processPendingWork = async () => {
  * Start pending-work scheduler.
  */
 export const startReminderScheduler = () => {
-  if (reminderTimer) return;
+  if (reminderTimer) {
+    return;
+  }
 
-  console.log('⏰ Pending-work scheduler started');
+  console.log(
+    "⏰ Pending-work scheduler started"
+  );
 
   processPendingWork().catch((error) => {
     console.error(
-      'Pending work scheduler failed:',
+      "Pending work scheduler failed:",
       error
     );
   });
@@ -154,7 +260,7 @@ export const startReminderScheduler = () => {
   reminderTimer = setInterval(() => {
     processPendingWork().catch((error) => {
       console.error(
-        'Pending work scheduler failed:',
+        "Pending work scheduler failed:",
         error
       );
     });
