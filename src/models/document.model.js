@@ -27,10 +27,12 @@ const documentSchema = new mongoose.Schema(
         type: String,
         required: true,
       },
+
       fileId: {
         type: String,
         required: true,
       },
+
       name: String,
       size: Number,
       mimeType: String,
@@ -50,36 +52,58 @@ const documentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
 
+    /*
+     * Visibility:
+     *
+     * team  -> team users can see it
+     * admin -> management/admin users can see it
+     * users -> selected users can see it
+     *
+     * Existing team/admin documents continue to work.
+     */
     visibility: {
       type: String,
-      enum: ["team", "admin"],
+      enum: ["team", "admin", "users"],
       default: "team",
+      index: true,
     },
 
-    // 🔔 Document reminder date and time
+    /*
+     * Users who are specifically allowed
+     * to see the document when visibility = "users".
+     */
+    visibleTo: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    // Document reminder
     reminderAt: {
       type: Date,
       default: null,
       index: true,
     },
 
-    // 📝 Optional reminder message
+    // Optional reminder message
     reminderNote: {
       type: String,
       trim: true,
       default: "",
     },
 
-    // ✅ Whether the reminder has been completed
+    // Whether reminder has been completed
     reminderCompleted: {
       type: Boolean,
       default: false,
       index: true,
     },
 
-    // 🔔 Prevents the scheduler from sending the same notification repeatedly
+    // Prevent repeated reminder notifications
     reminderNotifiedAt: {
       type: Date,
       default: null,
@@ -91,4 +115,6 @@ const documentSchema = new mongoose.Schema(
   }
 );
 
-export const Document = mongoose.model("Document", documentSchema);
+export const Document =
+  mongoose.models.Document ||
+  mongoose.model("Document", documentSchema);

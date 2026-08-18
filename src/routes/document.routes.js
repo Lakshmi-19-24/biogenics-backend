@@ -6,6 +6,7 @@ import {
   updateDocument,
   uploadDocument,
   completeDocumentReminder,
+  listDocumentSharingUsers,
 } from "../controllers/document.controller.js";
 
 import { authenticate } from "../middlewares/auth.js";
@@ -15,7 +16,22 @@ export const documentRouter = Router();
 
 documentRouter.use(authenticate);
 
-documentRouter.get("/", listDocuments);
+/*
+ * Users who can be selected for document visibility.
+ *
+ * IMPORTANT:
+ * This is NOT the /users management route.
+ * Sales can use this only for document sharing.
+ */
+documentRouter.get(
+  "/sharing-users",
+  listDocumentSharingUsers
+);
+
+documentRouter.get(
+  "/",
+  listDocuments
+);
 
 documentRouter.post(
   "/",

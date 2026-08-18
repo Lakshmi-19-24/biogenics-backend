@@ -1,217 +1,452 @@
 import { Document } from "../models/document.model.js";
+import { User } from "../models/user.model.js";
+
 import { ApiError } from "../utils/apiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResponse } from "../utils/apiResponse.js";
 import { getPagination } from "../utils/pagination.js";
 import { uploadToImageKit } from "../utils/uploadToImagekit.js";
+
 import { MANAGEMENT_ROLES } from "../constants/roles.js";
 
+/*
+ * ============================================================
+ * NORMALIZE visibleTo
+ * ============================================================
+ */
+
+const normalizeVisibleTo = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return parsed.filter(Boolean);
+      }
+    } catch {
+      // Not JSON.
+    }
+
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+/*
+ * ============================================================
+ * DOCUMENT ACCESS
+ * ============================================================
+ */
+
 const documentAccessFilter = (user) => {
+  /*
+   * Owner/Admin/Manager can see everything.
+   */
   if (MANAGEMENT_ROLES.includes(user.role)) {
     return {};
   }
 
+  /*
+   * Normal users:
+   *
+   * team      -> visible to team
+   * admin     -> uploader can see own admin document
+   * users     -> specifically selected users
+   * private   -> old documents uploaded by themselves
+   */
   return {
     $or: [
-      { visibility: "team" },
-      { visibility: "admin", uploadedBy: user._id },
-      { visibility: "private", uploadedBy: user._id },
+      {
+        visibility: "team",
+      },
+
+      {
+        visibility: "admin",
+        uploadedBy: user._id,
+      },
+
+      {
+        visibility: "users",
+        visibleTo: user._id,
+      },
+
+      {
+        visibility: "private",
+        uploadedBy: user._id,
+      },
     ],
   };
 };
 
-const canManageDocument = (document, user) =>
-  MANAGEMENT_ROLES.includes(user.role) ||
-  String(document.uploadedBy) === String(user._id);
-
-/**
- * Upload document
+/*
+ * ============================================================
+ * DOCUMENT MANAGEMENT PERMISSION
+ * ============================================================
  */
-export const uploadDocument = asyncHandler(async (req, res) => {
-  console.log("UPLOAD API HIT");
-  console.log("User:", req.user);
 
-  if (!req.file) {
-    throw new ApiError(400, "Document file is required");
-  }
+const canManageDocument = (
+  document,
+  user
+) =>
+  MANAGEMENT_ROLES.includes(user.role) ||
+  String(document.uploadedBy) ===
+    String(user._id);
 
-  const file = await uploadToImageKit(
-    req.file,
-    "/biogenics/documents"
-  );
+/*
+ * ============================================================
+ * DOCUMENT SHARING USERS
+ * ============================================================
+ *
+ * This is intentionally separate from /users.
+ *
+ * Sales can access this endpoint because it is
+ * inside the authenticated documents router.
+ *
+ * Only these three people are returned:
+ *
+ * Chandru
+ * Shilpa
+ * Chandan
+ */
+export const listDocumentSharingUsers =
+  asyncHandler(async (req, res) => {
+    const users = await User.find({
+      isActive: true,
 
-  const document = await Document.create({
-    ...req.body,
+      role: {
+        $in: [
+          "manager",
+          "sales",
+        ],
+      },
+    })
+      .select(
+        "_id name email role branch territory"
+      )
+      .sort({
+        name: 1,
+      });
 
-    visibility: ["admin", "team"].includes(req.body.visibility)
-      ? req.body.visibility
-      : "team",
+    console.log(
+      "DOCUMENT SHARING USERS:",
+      users.map((user) => ({
+        id: user._id,
+        name: user.name,
+        role: user.role,
+      }))
+    );
 
-    file,
-    uploadedBy: req.user._id,
+    sendResponse(
+      res,
+      200,
+      "Document sharing users fetched",
+      {
+        items: users,
+        total: users.length,
+      }
+    );
+  });
+/*
+ * ============================================================
+ * UPLOAD DOCUMENT
+ * ============================================================
+ */
+
+export const uploadDocument =
+  asyncHandler(async (req, res) => {
+    console.log("UPLOAD API HIT");
+    console.log("User:", req.user);
+
+    if (!req.file) {
+      throw new ApiError(
+        400,
+        "Document file is required"
+      );
+    }
+
+    const file =
+      await uploadToImageKit(
+        req.file,
+        "/biogenics/documents"
+      );
+
+    let visibility =
+      req.body.visibility;
+
+    if (
+      ![
+        "team",
+        "admin",
+        "users",
+      ].includes(visibility)
+    ) {
+      visibility = "team";
+    }
+
+    let visibleTo =
+      normalizeVisibleTo(
+        req.body.visibleTo
+      );
+
+    if (
+      visibility === "users" &&
+      visibleTo.length === 0
+    ) {
+      throw new ApiError(
+        400,
+        "Please select at least one user"
+      );
+    }
+
+    if (visibility !== "users") {
+      visibleTo = [];
+    }
+
+    const document =
+      await Document.create({
+        ...req.body,
+
+        visibility,
+
+        visibleTo,
+
+        file,
+
+        uploadedBy:
+          req.user._id,
+      });
+
+    const populatedDocument =
+      await Document.findById(
+        document._id
+      )
+        .populate(
+          "uploadedBy",
+          "name email role"
+        )
+        .populate(
+          "visibleTo",
+          "name email role"
+        );
+
+    sendResponse(
+      res,
+      201,
+      "Document uploaded",
+      populatedDocument
+    );
   });
 
-  sendResponse(
-    res,
-    201,
-    "Document uploaded",
-    document
-  );
-});
-
-/**
- * List documents
+/*
+ * ============================================================
+ * LIST DOCUMENTS
+ * ============================================================
  */
-export const listDocuments = asyncHandler(async (req, res) => {
-  const { page, limit, skip } = getPagination(req.query);
 
-  const filter = documentAccessFilter(req.user);
-
-  if (req.query.customer) {
-    filter.customer = req.query.customer;
-  }
-
-  if (req.query.order) {
-    filter.order = req.query.order;
-  }
-
-  if (req.query.category) {
-    filter.category = req.query.category;
-  }
-
-  const [items, total] = await Promise.all([
-    Document.find(filter)
-      .populate("uploadedBy", "name email")
-      .skip(skip)
-      .limit(limit)
-      .sort("-createdAt"),
-
-    Document.countDocuments(filter),
-  ]);
-
-  sendResponse(
-    res,
-    200,
-    "Documents fetched",
-    {
-      items,
+export const listDocuments =
+  asyncHandler(async (req, res) => {
+    const {
       page,
       limit,
+      skip,
+    } = getPagination(req.query);
+
+    /*
+     * Maximum 1000 documents.
+     */
+    const safeLimit = Math.min(
+      Number(limit) || 100,
+      1000
+    );
+
+    const filter =
+      documentAccessFilter(
+        req.user
+      );
+
+    if (req.query.customer) {
+      filter.customer =
+        req.query.customer;
+    }
+
+    if (req.query.order) {
+      filter.order =
+        req.query.order;
+    }
+
+    if (req.query.category) {
+      filter.category =
+        req.query.category;
+    }
+
+    const [
+      items,
       total,
-    }
-  );
-});
+    ] = await Promise.all([
+      Document.find(filter)
+        .populate(
+          "uploadedBy",
+          "name email role"
+        )
+        .populate(
+          "visibleTo",
+          "name email role"
+        )
+        .skip(skip)
+        .limit(safeLimit)
+        .sort("-createdAt"),
 
-/**
- * Update document
- */
-export const updateDocument = asyncHandler(async (req, res) => {
-  const allowed = [
-    "title",
-    "category",
-    "customer",
-    "order",
-    "visibility",
-    "reminderAt",
-    "reminderNote",
-    "reminderCompleted",
-  ];
+      Document.countDocuments(
+        filter
+      ),
+    ]);
 
-  const payload = {};
-
-  for (const key of allowed) {
-    if (req.body[key] !== undefined) {
-      payload[key] = req.body[key];
-    }
-  }
-
-  if (
-    payload.visibility &&
-    !["admin", "team"].includes(payload.visibility)
-  ) {
-    payload.visibility = "team";
-  }
-
-  const existing = await Document.findOne({
-    _id: req.params.id,
-    ...documentAccessFilter(req.user),
-  });
-
-  if (!existing) {
-    throw new ApiError(404, "Document not found");
-  }
-
-  if (!canManageDocument(existing, req.user)) {
-    throw new ApiError(
-      403,
-      "You cannot update this document"
+    sendResponse(
+      res,
+      200,
+      "Documents fetched",
+      {
+        items,
+        page,
+        limit: safeLimit,
+        total,
+      }
     );
-  }
-
-  const document = await Document.findByIdAndUpdate(
-    req.params.id,
-    payload,
-    {
-      new: true,
-      runValidators: true,
-    }
-  );
-
-  if (!document) {
-    throw new ApiError(404, "Document not found");
-  }
-
-  sendResponse(
-    res,
-    200,
-    "Document updated",
-    document
-  );
-});
-
-/**
- * Delete document
- */
-export const deleteDocument = asyncHandler(async (req, res) => {
-  const document = await Document.findOne({
-    _id: req.params.id,
-    ...documentAccessFilter(req.user),
   });
 
-  if (!document) {
-    throw new ApiError(404, "Document not found");
-  }
-
-  if (!canManageDocument(document, req.user)) {
-    throw new ApiError(
-      403,
-      "You cannot delete this document"
-    );
-  }
-
-  await Document.deleteOne({
-    _id: document._id,
-  });
-
-  sendResponse(
-    res,
-    200,
-    "Document deleted",
-    {
-      id: req.params.id,
-    }
-  );
-});
-
-/**
- * Mark document reminder as completed
+/*
+ * ============================================================
+ * UPDATE DOCUMENT
+ * ============================================================
  */
-export const completeDocumentReminder = asyncHandler(
-  async (req, res) => {
-    const document = await Document.findOne({
-      _id: req.params.id,
-      ...documentAccessFilter(req.user),
-    });
+
+export const updateDocument =
+  asyncHandler(async (req, res) => {
+    const allowed = [
+      "title",
+      "category",
+      "customer",
+      "order",
+      "visibility",
+      "visibleTo",
+      "reminderAt",
+      "reminderNote",
+      "reminderCompleted",
+    ];
+
+    const payload = {};
+
+    for (const key of allowed) {
+      if (
+        req.body[key] !==
+        undefined
+      ) {
+        payload[key] =
+          req.body[key];
+      }
+    }
+
+    if (
+      payload.visibility &&
+      ![
+        "team",
+        "admin",
+        "users",
+      ].includes(
+        payload.visibility
+      )
+    ) {
+      payload.visibility =
+        "team";
+    }
+
+    if (
+      payload.visibleTo !==
+      undefined
+    ) {
+      payload.visibleTo =
+        normalizeVisibleTo(
+          payload.visibleTo
+        );
+    }
+
+    if (
+      payload.visibility ===
+        "users" &&
+      (!payload.visibleTo ||
+        payload.visibleTo.length ===
+          0)
+    ) {
+      throw new ApiError(
+        400,
+        "Please select at least one user"
+      );
+    }
+
+    if (
+      payload.visibility &&
+      payload.visibility !==
+        "users"
+    ) {
+      payload.visibleTo = [];
+    }
+
+    const existing =
+      await Document.findOne({
+        _id: req.params.id,
+        ...documentAccessFilter(
+          req.user
+        ),
+      });
+
+    if (!existing) {
+      throw new ApiError(
+        404,
+        "Document not found"
+      );
+    }
+
+    if (
+      !canManageDocument(
+        existing,
+        req.user
+      )
+    ) {
+      throw new ApiError(
+        403,
+        "You cannot update this document"
+      );
+    }
+
+    const document =
+      await Document.findByIdAndUpdate(
+        req.params.id,
+        payload,
+        {
+          new: true,
+          runValidators: true,
+        }
+      )
+        .populate(
+          "uploadedBy",
+          "name email role"
+        )
+        .populate(
+          "visibleTo",
+          "name email role"
+        );
 
     if (!document) {
       throw new ApiError(
@@ -220,14 +455,100 @@ export const completeDocumentReminder = asyncHandler(
       );
     }
 
-    if (!canManageDocument(document, req.user)) {
+    sendResponse(
+      res,
+      200,
+      "Document updated",
+      document
+    );
+  });
+
+/*
+ * ============================================================
+ * DELETE DOCUMENT
+ * ============================================================
+ */
+
+export const deleteDocument =
+  asyncHandler(async (req, res) => {
+    const document =
+      await Document.findOne({
+        _id: req.params.id,
+        ...documentAccessFilter(
+          req.user
+        ),
+      });
+
+    if (!document) {
+      throw new ApiError(
+        404,
+        "Document not found"
+      );
+    }
+
+    if (
+      !canManageDocument(
+        document,
+        req.user
+      )
+    ) {
+      throw new ApiError(
+        403,
+        "You cannot delete this document"
+      );
+    }
+
+    await Document.deleteOne({
+      _id: document._id,
+    });
+
+    sendResponse(
+      res,
+      200,
+      "Document deleted",
+      {
+        id: req.params.id,
+      }
+    );
+  });
+
+/*
+ * ============================================================
+ * COMPLETE REMINDER
+ * ============================================================
+ */
+
+export const completeDocumentReminder =
+  asyncHandler(async (req, res) => {
+    const document =
+      await Document.findOne({
+        _id: req.params.id,
+        ...documentAccessFilter(
+          req.user
+        ),
+      });
+
+    if (!document) {
+      throw new ApiError(
+        404,
+        "Document not found"
+      );
+    }
+
+    if (
+      !canManageDocument(
+        document,
+        req.user
+      )
+    ) {
       throw new ApiError(
         403,
         "You cannot update this document reminder"
       );
     }
 
-    document.reminderCompleted = true;
+    document.reminderCompleted =
+      true;
 
     await document.save();
 
@@ -237,5 +558,4 @@ export const completeDocumentReminder = asyncHandler(
       "Document reminder completed",
       document
     );
-  }
-);
+  });
