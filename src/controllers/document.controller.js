@@ -52,7 +52,7 @@ const normalizeVisibleTo = (value) => {
 
 const documentAccessFilter = (user) => {
   /*
-   * Owner/Admin/Manager can see everything.
+   * Owner / Admin / Manager can see everything.
    */
   if (MANAGEMENT_ROLES.includes(user.role)) {
     return {};
@@ -71,17 +71,14 @@ const documentAccessFilter = (user) => {
       {
         visibility: "team",
       },
-
       {
         visibility: "admin",
         uploadedBy: user._id,
       },
-
       {
         visibility: "users",
         visibleTo: user._id,
       },
-
       {
         visibility: "private",
         uploadedBy: user._id,
@@ -109,17 +106,13 @@ const canManageDocument = (
  * DOCUMENT SHARING USERS
  * ============================================================
  *
- * This is intentionally separate from /users.
- *
- * Sales can access this endpoint because it is
- * inside the authenticated documents router.
- *
- * Only these three people are returned:
+ * Only these three users are returned:
  *
  * Chandru
- * Shilpa
  * Chandan
+ * Shilpa
  */
+
 export const listDocumentSharingUsers =
   asyncHandler(async (req, res) => {
     const allowedNames = [
@@ -170,6 +163,7 @@ export const listDocumentSharingUsers =
       }
     );
   });
+
 /*
  * ============================================================
  * UPLOAD DOCUMENT
@@ -212,6 +206,10 @@ export const uploadDocument =
         req.body.visibleTo
       );
 
+    /*
+     * Specific users must have
+     * at least one selected user.
+     */
     if (
       visibility === "users" &&
       visibleTo.length === 0
@@ -222,6 +220,10 @@ export const uploadDocument =
       );
     }
 
+    /*
+     * If visibility is not
+     * specific users, clear visibleTo.
+     */
     if (visibility !== "users") {
       visibleTo = [];
     }
@@ -240,6 +242,9 @@ export const uploadDocument =
           req.user._id,
       });
 
+    /*
+     * Return populated document.
+     */
     const populatedDocument =
       await Document.findById(
         document._id
@@ -265,6 +270,13 @@ export const uploadDocument =
  * ============================================================
  * LIST DOCUMENTS
  * ============================================================
+ *
+ * IMPORTANT:
+ *
+ * Documents can load up to 1000 records.
+ *
+ * The global pagination maximum can remain
+ * at 100 for other modules.
  */
 
 export const listDocuments =
@@ -273,13 +285,8 @@ export const listDocuments =
       page,
       limit,
       skip,
-    } = getPagination(req.query);
-
-    /*
-     * Maximum 1000 documents.
-     */
-    const safeLimit = Math.min(
-      Number(limit) || 100,
+    } = getPagination(
+      req.query,
       1000
     );
 
@@ -317,7 +324,7 @@ export const listDocuments =
           "name email role"
         )
         .skip(skip)
-        .limit(safeLimit)
+        .limit(limit)
         .sort("-createdAt"),
 
       Document.countDocuments(
@@ -332,7 +339,7 @@ export const listDocuments =
       {
         items,
         page,
-        limit: safeLimit,
+        limit,
         total,
       }
     );
@@ -370,6 +377,9 @@ export const updateDocument =
       }
     }
 
+    /*
+     * Validate visibility.
+     */
     if (
       payload.visibility &&
       ![
@@ -384,6 +394,9 @@ export const updateDocument =
         "team";
     }
 
+    /*
+     * Normalize selected users.
+     */
     if (
       payload.visibleTo !==
       undefined
@@ -394,6 +407,10 @@ export const updateDocument =
         );
     }
 
+    /*
+     * Specific users requires
+     * at least one selected user.
+     */
     if (
       payload.visibility ===
         "users" &&
@@ -407,6 +424,10 @@ export const updateDocument =
       );
     }
 
+    /*
+     * Clear selected users when
+     * visibility is team/admin.
+     */
     if (
       payload.visibility &&
       payload.visibility !==
@@ -415,6 +436,9 @@ export const updateDocument =
       payload.visibleTo = [];
     }
 
+    /*
+     * Find existing document.
+     */
     const existing =
       await Document.findOne({
         _id: req.params.id,
@@ -430,6 +454,9 @@ export const updateDocument =
       );
     }
 
+    /*
+     * Check permission.
+     */
     if (
       !canManageDocument(
         existing,
@@ -442,6 +469,9 @@ export const updateDocument =
       );
     }
 
+    /*
+     * Update only this document.
+     */
     const document =
       await Document.findByIdAndUpdate(
         req.params.id,
@@ -479,6 +509,10 @@ export const updateDocument =
  * ============================================================
  * DELETE DOCUMENT
  * ============================================================
+ *
+ * This deletes ONLY the selected document.
+ *
+ * Creating a new document never calls this function.
  */
 
 export const deleteDocument =
