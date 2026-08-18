@@ -122,13 +122,25 @@ const canManageDocument = (
  */
 export const listDocumentSharingUsers =
   asyncHandler(async (req, res) => {
+    const allowedNames = [
+      "chandru",
+      "chandan",
+      "shilpa",
+    ];
+
     const users = await User.find({
       isActive: true,
 
-      role: {
+      $expr: {
         $in: [
-          "manager",
-          "sales",
+          {
+            $toLower: {
+              $trim: {
+                input: "$name",
+              },
+            },
+          },
+          allowedNames,
         ],
       },
     })
