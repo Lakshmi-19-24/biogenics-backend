@@ -1,7 +1,7 @@
 import { LocationPing } from "../models/locationPing.model.js";
+import { Attendance } from "../models/attendance.model.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { sendResponse } from "../utils/apiResponse.js";
-import { getPagination } from "../utils/pagination.js";
 
 /*
  * ============================================================
@@ -13,7 +13,7 @@ import { getPagination } from "../utils/pagination.js";
  * Manager   -> tracked
  *
  * Owner     -> can view team GPS, but is not tracked
- * Admin     -> cannot view team GPS and is not tracked
+ * Admin     -> tracked according to current configuration
  */
 const TRACKED_ROLES = [
   "admin",
@@ -34,6 +34,40 @@ const GPS_VIEWER_ROLES = [
 
 /*
  * ============================================================
+ * CHECK ACTIVE ATTENDANCE / CHECK-IN
+ * ============================================================
+ *
+ * GPS tracking is allowed only when the employee
+ * currently has an active attendance check-in.
+ *
+ * Active check-in means:
+ *
+ * checkInAt  -> exists
+ * checkOutAt -> does not exist
+ */
+export const hasActiveCheckIn = async (userId) => {
+  const today = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const attendance =
+    await Attendance.findOne({
+      employee: userId,
+
+      date: today,
+
+      checkInAt: {
+        $ne: null,
+      },
+
+      checkOutAt: null,
+    }).select("_id");
+
+  return Boolean(attendance);
+};
+
+/*
+ * ============================================================
  * CREATE LOCATION PING
  * ============================================================
  *
@@ -47,15 +81,42 @@ export const createLocationPing =
     ).toLowerCase();
 
     /*
-     * Only Sales, Billing and Manager
-     * should send team tracking locations.
+     * Only tracked roles can send
+     * team tracking locations.
      */
-    if (!TRACKED_ROLES.includes(userRole)) {
+    if (
+      !TRACKED_ROLES.includes(
+        userRole
+      )
+    ) {
       return sendResponse(
         res,
         403,
         "GPS tracking is not enabled for this user role"
       );
+    }
+
+    /*
+     * Sales, Billing and Manager
+     * must have an active check-in.
+     */
+    if (
+      ["sales", "billing", "manager"].includes(
+        userRole
+      )
+    ) {
+      const activeCheckIn =
+        await hasActiveCheckIn(
+          req.user._id
+        );
+
+      if (!activeCheckIn) {
+        return sendResponse(
+          res,
+          403,
+          "GPS tracking requires an active check-in"
+        );
+      }
     }
 
     const latitude = Number(
@@ -77,6 +138,20 @@ export const createLocationPing =
         res,
         400,
         "Valid latitude and longitude are required"
+      );
+    }
+
+    /*
+     * Reject impossible 0,0 coordinates.
+     */
+    if (
+      latitude === 0 &&
+      longitude === 0
+    ) {
+      return sendResponse(
+        res,
+        400,
+        "Invalid GPS coordinates"
       );
     }
 
@@ -108,9 +183,36 @@ export const createLocationPing =
       );
     }
 
+    /*
+     * GPS accuracy validation.
+     *
+     * 2000 meters = maximum accepted accuracy.
+     */
+    const accuracy =
+      req.body.accuracy != null
+        ? Number(req.body.accuracy)
+        : null;
+
+    if (
+      accuracy !== null &&
+      (
+        !Number.isFinite(
+          accuracy
+        ) ||
+        accuracy > 2000
+      )
+    ) {
+      return sendResponse(
+        res,
+        400,
+        "GPS accuracy is too low"
+      );
+    }
+
     const ping =
       await LocationPing.create({
-        employee: req.user._id,
+        employee:
+          req.user._id,
 
         source:
           req.body.source ||
@@ -118,6 +220,7 @@ export const createLocationPing =
 
         location: {
           type: "Point",
+
           coordinates: [
             longitude,
             latitude,
@@ -126,21 +229,23 @@ export const createLocationPing =
 
         speed:
           req.body.speed != null
-            ? Number(req.body.speed)
+            ? Number(
+                req.body.speed
+              )
             : 0,
 
         battery:
           req.body.battery != null
-            ? Number(req.body.battery)
+            ? Number(
+                req.body.battery
+              )
             : null,
 
-        accuracy:
-          req.body.accuracy != null
-            ? Number(req.body.accuracy)
-            : null,
+        accuracy,
 
         metadata:
-          req.body.metadata || {},
+          req.body.metadata ||
+          {},
 
         trackedAt:
           req.body.trackedAt
@@ -205,10 +310,7 @@ export const listLocationPings =
 
     /*
      * Only show locations belonging to
-     * Sales, Billing and Manager users.
-     *
-     * We apply this through employee IDs
-     * below.
+     * tracked users.
      */
     const trackedUsers =
       await import(
@@ -318,14 +420,8 @@ export const listLocationPings =
  * This is what the Owner and Manager
  * GPS Tracking page uses.
  *
- * Returns ONLY:
- *
- * Sales
- * Billing
- * Manager
- *
- * and returns ONLY the latest GPS point
- * for each person.
+ * Returns ONLY the latest GPS point
+ * for each tracked person.
  */
 export const latestLocations =
   asyncHandler(async (req, res) => {
@@ -366,6 +462,7 @@ export const latestLocations =
         {
           $group: {
             _id: "$employee",
+
             ping: {
               $first: "$$ROOT",
             },
@@ -393,12 +490,8 @@ export const latestLocations =
         },
 
         /*
-         * VERY IMPORTANT:
-         *
-         * Only Sales, Billing and Manager
-         * appear on the Owner/Manager map.
-         *
-         * Owner and Admin are excluded.
+         * Only tracked roles appear
+         * on the Owner / Manager map.
          */
         {
           $match: {
